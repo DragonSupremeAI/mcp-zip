@@ -9,14 +9,17 @@
 </a>
 
 ZIP MCP Server 是一个基于 fastMCP 和 zip.js 的压缩服务器，实现了 Model Context Protocol (MCP) 协议。本项目提供了全参数可控的 ZIP 压缩、解压缩和查询压缩包信息功能。
+除了默认的 `stdio` 传输模式（适用于 Cursor、Claude Desktop 等本地客户端），现在还支持 **HTTP 传输**，可部署为远程服务供 Hugging Face Chat 等模型调用。通过设置环境变量启动为 HTTP 模式，服务将暴露 REST API，包括健康检查、工具列举和调用接口。工具同时支持基于路径的文件操作和通过 base64 字符串进行的安全内存操作。
 
 ## 功能特点
 
 - 支持文件和数据的压缩与解压缩
 - 支持多文件打包压缩
-- 提供压缩级别控制 (0-9)
+- 提供压缩级别控制 (0‑9)
 - 支持密码保护和加密强度设置
 - 提供压缩包元数据查询功能
+- **HTTP 传输**（可选），提供 health 和调用端点
+- **base64 工具**，适合远程调用时安全传输数据
 
 ## 项目结构
 
@@ -26,8 +29,9 @@ zip-mcp
 │   ├── index.ts               # 应用程序入口点
 │   ├── utils
 │   │   └── compression.ts     # 压缩和解压缩功能实现
-├── tsconfig.json              # TypeScript配置文件
-├── package.json               # npm配置文件
+│   └── transport/http.ts      # （在 index.ts 中内嵌）HTTP 服务工具
+├── tsconfig.json              # TypeScript 配置文件
+├── package.json               # npm 配置文件
 └── README.md                  # 项目文档
 ```
 
@@ -73,9 +77,9 @@ ZIP MCP Server 提供了以下工具，可通过 MCP 协议调用：
 - `input`: 要压缩的文件或目录路径（字符串或字符串数组）
 - `output`: 输出 ZIP 文件的路径
 - `options`: 压缩选项（可选）
-  - `level`: 压缩级别 (0-9，默认为 5)
+  - `level`: 压缩级别 (0‑9，默认为 5)
   - `password`: 密码保护
-  - `encryptionStrength`: 加密强度 (1-3)
+  - `encryptionStrength`: 加密强度 (1‑3)
   - `overwrite`: 是否覆盖现有文件 (布尔值)
 
 **返回:**
@@ -113,12 +117,7 @@ ZIP MCP Server 提供了以下工具，可通过 MCP 协议调用：
 
 **返回:**
 
-- 成功: 包含 ZIP 文件详细信息的文本内容，包括：
-  - 总文件数
-  - 总大小
-  - 压缩后大小
-  - 压缩率
-  - 每个文件的详细信息
+- 成功: 包含 ZIP 文件详细信息的文本内容
 - 失败: 包含错误信息的文本内容
 
 ### 测试工具 (echo)
@@ -132,6 +131,50 @@ ZIP MCP Server 提供了以下工具，可通过 MCP 协议调用：
 **返回:**
 
 - 包含输入消息和当前时间戳的文本内容
+
+### base64 压缩工具 (compressBytes)
+
+将多个内存中的文件（以 base64 表示）压缩为 ZIP 档案，返回 base64 字符串。
+
+**参数:**
+
+- `files`: 由 `{ name: string, dataBase64: string }` 组成的数组
+- `options`: 压缩选项（可选）
+  - `level`: 压缩级别 (0‑9，默认为 5)
+  - `password`: 密码保护
+  - `encryptionStrength`: 加密强度 (1‑3)
+
+**返回:**
+
+- base64 编码的 ZIP 字符串
+
+### base64 解压工具 (decompressBytes)
+
+将 base64 编码的 ZIP 档案解压，返回文件数组，文件数据以 base64 表示。
+
+**参数:**
+
+- `zipDataBase64`: base64 编码的 ZIP 文件
+- `options`: 解压选项（可选）
+  - `password`: 解压密码
+
+**返回:**
+
+- JSON 字符串数组，其中每项包含 `{ name: string, dataBase64: string }`
+
+### base64 ZIP 信息工具 (getZipInfoBytes)
+
+获取 base64 ZIP 档案的元数据信息。
+
+**参数:**
+
+- `zipDataBase64`: base64 编码的 ZIP 文件
+- `options`: 选项（可选）
+  - `password`: 解压密码
+
+**返回:**
+
+- JSON 字符串的元数据，包括总文件数、总大小、压缩后大小、压缩率和各文件详情
 
 ## 示例
 
@@ -161,7 +204,7 @@ await client.executeTool("decompress", {
   },
 });
 
-// 获取ZIP信息
+// 获取 ZIP 信息
 await client.executeTool("getZipInfo", {
   input: "/path/to/archive.zip",
   options: {
@@ -173,7 +216,43 @@ await client.executeTool("getZipInfo", {
 await client.executeTool("echo", {
   message: "Hello, ZIP MCP Server!",
 });
+
+// 内存文件压缩 (base64)
+await client.executeTool("compressBytes", {
+  files: [
+    { name: "a.txt", dataBase64: btoa("hello world") },
+    { name: "b.txt", dataBase64: btoa("foo bar") },
+  ],
+});
+
+// 解压 base64 ZIP
+const zippedBase64 = "...";
+await client.executeTool("decompressBytes", {
+  zipDataBase64: zippedBase64,
+});
+
+// 获取 base64 ZIP 信息
+await client.executeTool("getZipInfoBytes", {
+  zipDataBase64: zippedBase64,
+});
 ```
+
+## HTTP 模式
+
+默认情况下，服务器使用 `stdio` 传输，适合与本地 AI 客户端一起运行。要将服务器以 HTTP 模式暴露（例如供 Hugging Face Chat 使用），可以在启动前设置 `HTTP_PORT` 或 `MCP_HTTP_PORT` 环境变量：
+
+```bash
+# 在端口 8080 上启用 HTTP 模式
+HTTP_PORT=8080 npx tsx src/index.ts
+```
+
+在 HTTP 模式下，可用的端点包括：
+
+- `GET /health` – 返回服务名称、版本和工具列表
+- `GET /tools` – 返回注册的工具名称
+- `POST /invoke/<toolName>` – 调用指定工具，请求体为 JSON，包含工具参数；响应体为工具结果
+
+这些端点使得将 ZIP MCP Server 作为远程 MCP 服务器集成到 Hugging Face Chat 成为可能。用户可以在聊天界面的 “MCP tools” 部分添加此服务的 URL。
 
 ## 联系方式
 

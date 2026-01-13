@@ -9,12 +9,122 @@ import {
 } from "./utils/compression.js";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as http from "http";
+import { Buffer } from "buffer";
 
 // Create FastMCP server instance
 const server = new FastMCP({
   name: "ZIP MCP Server",
   version: "1.0.3",
 });
+
+// Registry of tools for HTTP transport
+interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: unknown;
+  execute: (args: any) => Promise<any>;
+}
+const toolRegistry: Record<string, ToolDefinition> = {};
+
+/**
+ * Helper wrapper around server.addTool to also record the tool in our registry.
+ * This allows the HTTP server to dispatch requests without relying on private
+ * internals of the FastMCP server.
+ */
+const addTool = (tool: {
+  name: string;
+  description: string;
+  parameters: any;
+  execute: (args: any) => Promise<any>;
+}) => {
+  server.addTool(tool);
+  toolRegistry[tool.name] = {
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+    execute: tool.execute,
+  };
+};
+
+/**
+ * Execute a tool by name. Throws an error if the tool is not registered.
+ */
+const executeTool = async (name: string, args: any) => {
+  const tool = toolRegistry[name];
+  if (!tool) {
+    throw new Error(`Tool not found: ${name}`);
+  }
+  return await tool.execute(args);
+};
+
+/**
+ * List all registered tool names.
+ */
+const listTools = () => Object.keys(toolRegistry);
+
+/**
+ * Start a simple HTTP server that exposes the registered tools over HTTP.
+ * - GET /health returns basic service information.
+ * - GET /tools returns the list of tool names.
+ * - POST /invoke/:toolName invokes a tool with JSON arguments and returns the result.
+ */
+function startHttpServer(port: number) {
+  const httpServer = http.createServer(async (req, res) => {
+    if (!req.url) {
+      res.statusCode = 404;
+      res.end();
+      return;
+    }
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    // Health check endpoint
+    if (req.method === "GET" && url.pathname === "/health") {
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          name: (server as any)["name"],
+          version: (server as any)["version"],
+          tools: listTools(),
+        })
+      );
+      return;
+    }
+    // List tools
+    if (req.method === "GET" && url.pathname === "/tools") {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ tools: listTools() }));
+      return;
+    }
+    // Invoke tool
+    if (req.method === "POST" && url.pathname.startsWith("/invoke/")) {
+      const parts = url.pathname.split("/");
+      const toolName = parts[2];
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", async () => {
+        try {
+          const args = body ? JSON.parse(body) : {};
+          const result = await executeTool(toolName, args);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(result));
+        } catch (err: any) {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: err.message || String(err) }));
+        }
+      });
+      return;
+    }
+    // Unknown endpoint
+    res.statusCode = 404;
+    res.end();
+  });
+  httpServer.listen(port, () => {
+    console.log(`HTTP MCP server listening on port ${port}`);
+  });
+}
 
 // General error handling function
 const formatError = (error: unknown): string => {
@@ -61,7 +171,7 @@ const getAllFiles = async (
 };
 
 // Compression tool - Compress local files
-server.addTool({
+addTool({
   name: "compress",
   description: "Compress local files or directories into a ZIP file",
   parameters: z.object({
@@ -72,15 +182,17 @@ server.addTool({
     output: z.string(), // Output ZIP file path
     options: z
       .object({
-      level: z.number().min(0).max(9).optional(),
-      comment: z.string().optional(),
-      password: z.string().optional(),
-      encryptionStrength: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
-      overwrite: z.boolean().optional(),
+        level: z.number().min(0).max(9).optional(),
+        comment: z.string().optional(),
+        password: z.string().optional(),
+        encryptionStrength: z
+          .union([z.literal(1), z.literal(2), z.literal(3)])
+          .optional(),
+        overwrite: z.boolean().optional(),
       })
       .optional(),
-    }),
-    execute: async (args) => {
+  }),
+  execute: async (args) => {
     try {
       const outputPath = args.output;
       // Separate CompressionOptions and other options
@@ -136,11 +248,10 @@ server.addTool({
         }
       }
 
-      if(compressionOptions?.level && compressionOptions.level > 9) {
+      if (compressionOptions?.level && compressionOptions.level > 9) {
         compressionOptions.level = 9;
       }
-
-      if(compressionOptions?.level && compressionOptions.level < 0) {
+      if (compressionOptions?.level && compressionOptions.level < 0) {
         compressionOptions.level = 0;
       }
 
@@ -160,14 +271,16 @@ server.addTool({
       };
     } catch (error) {
       return {
-        content: [{ type: "text", text: `Compression failed: ${formatError(error)}` }],
+        content: [
+          { type: "text", text: `Compression failed: ${formatError(error)}` },
+        ],
       };
     }
   },
 });
 
 // Decompression tool - Decompress local ZIP file
-server.addTool({
+addTool({
   name: "decompress",
   description: "Decompress local ZIP file to specified directory",
   parameters: z.object({
@@ -215,11 +328,11 @@ server.addTool({
       const zipData = await fs.readFile(inputPath);
 
       // Decompress file
-      const result = await decompressData(new Uint8Array(zipData), options);
+      const resultFiles = await decompressData(new Uint8Array(zipData), options);
 
       // Extract files to output directory
       const extractedFiles: string[] = [];
-      for (const file of result) {
+      for (const file of resultFiles) {
         const outputFilePath = path.join(outputPath, file.name);
         const outputFileDir = path.dirname(outputFilePath);
 
@@ -249,14 +362,16 @@ server.addTool({
       };
     } catch (error) {
       return {
-        content: [{ type: "text", text: `Decompression failed: ${formatError(error)}` }],
+        content: [
+          { type: "text", text: `Decompression failed: ${formatError(error)}` },
+        ],
       };
     }
   },
 });
 
 // Get ZIP info tool - Get local ZIP file information
-server.addTool({
+addTool({
   name: "getZipInfo",
   description: "Get metadata information of a local ZIP file",
   parameters: z.object({
@@ -285,10 +400,7 @@ server.addTool({
 
       const compressionRatio =
         metadata.totalSize > 0
-          ? (
-              (1 - metadata.totalCompressedSize / metadata.totalSize) *
-              100
-            ).toFixed(2) + "%"
+          ? ((1 - metadata.totalCompressedSize / metadata.totalSize) * 100).toFixed(2) + "%"
           : "0%";
 
       // File size formatting
@@ -302,13 +414,12 @@ server.addTool({
 
       // Build file information text
       const filesInfo = metadata.files
-        .map(
-          (file: ZipInfo) =>
-            `- ${file.filename}: Original size=${formatSize(
-              file.size
-            )}, Compressed=${formatSize(file.compressedSize)}, Modified date=${new Date(
-              file.lastModDate
-            ).toLocaleString()}, Encrypted=${file.encrypted ? "Yes" : "No"}`
+        .map((file: ZipInfo) =>
+          `- ${file.filename}: Original size=${formatSize(file.size)}, Compressed=${formatSize(
+            file.compressedSize
+          )}, Modified date=${new Date(file.lastModDate).toLocaleString()}, Encrypted=${
+            file.encrypted ? "Yes" : "No"
+          }`
         )
         .join("\n");
 
@@ -335,7 +446,10 @@ server.addTool({
     } catch (error) {
       return {
         content: [
-          { type: "text", text: `Failed to get ZIP information: ${formatError(error)}` },
+          {
+            type: "text",
+            text: `Failed to get ZIP information: ${formatError(error)}`,
+          },
         ],
       };
     }
@@ -343,7 +457,7 @@ server.addTool({
 });
 
 // Test tool - Simple echo function to test if the service is running properly
-server.addTool({
+addTool({
   name: "echo",
   description: "Return the input message (for testing)",
   parameters: z.object({
@@ -359,9 +473,171 @@ server.addTool({
   },
 });
 
-// Start server
-server.start({
-  transportType: "stdio",
+// Compress bytes tool - compress files provided as base64 strings
+addTool({
+  name: "compressBytes",
+  description:
+    "Compress base64 input files and return ZIP archive as a base64 string",
+  parameters: z.object({
+    files: z.array(
+      z.object({
+        name: z.string(),
+        dataBase64: z.string(),
+      })
+    ),
+    options: z
+      .object({
+        level: z.number().min(0).max(9).optional(),
+        comment: z.string().optional(),
+        password: z.string().optional(),
+        encryptionStrength: z
+          .union([z.literal(1), z.literal(2), z.literal(3)])
+          .optional(),
+      })
+      .optional(),
+  }),
+  execute: async (args) => {
+    try {
+      const inputFiles = args.files.map((item: any) => {
+        const buffer = Buffer.from(item.dataBase64, "base64");
+        return {
+          name: item.name,
+          data: new Uint8Array(buffer),
+        };
+      });
+      const compressionOptions = args.options || {};
+      const resultZip = await compressData(inputFiles, compressionOptions);
+      const base64 = Buffer.from(resultZip).toString("base64");
+      return {
+        content: [
+          {
+            type: "text",
+            text: base64,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Compression failed: ${formatError(error)}` },
+        ],
+      };
+    }
+  },
 });
+
+// Decompress bytes tool - decompress a ZIP archive provided as a base64 string
+addTool({
+  name: "decompressBytes",
+  description:
+    "Decompress a base64 ZIP archive and return files with names and base64 data",
+  parameters: z.object({
+    zipDataBase64: z.string(),
+    options: z
+      .object({
+        password: z.string().optional(),
+      })
+      .optional(),
+  }),
+  execute: async (args) => {
+    try {
+      const buffer = Buffer.from(args.zipDataBase64, "base64");
+      const files = await decompressData(
+        new Uint8Array(buffer),
+        args.options || {}
+      );
+      const outputFiles = files.map((f) => ({
+        name: f.name,
+        dataBase64: Buffer.from(f.data).toString("base64"),
+      }));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(outputFiles),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          { type: "text", text: `Decompression failed: ${formatError(error)}` },
+        ],
+      };
+    }
+  },
+});
+
+// Get ZIP info from base64 tool - returns metadata for a base64 ZIP archive
+addTool({
+  name: "getZipInfoBytes",
+  description:
+    "Get metadata information of a ZIP archive provided as a base64 string",
+  parameters: z.object({
+    zipDataBase64: z.string(),
+    options: z
+      .object({
+        password: z.string().optional(),
+      })
+      .optional(),
+  }),
+  execute: async (args) => {
+    try {
+      const buffer = Buffer.from(args.zipDataBase64, "base64");
+      const metadata = await getZipInfo(
+        new Uint8Array(buffer),
+        args.options || {}
+      );
+      const compressionRatio =
+        metadata.totalSize > 0
+          ? ((1 - metadata.totalCompressedSize / metadata.totalSize) * 100).toFixed(2) + "%"
+          : "0%";
+      const resultInfo = {
+        totalFiles: metadata.files.length,
+        totalSize: metadata.totalSize,
+        totalCompressedSize: metadata.totalCompressedSize,
+        compressionRatio,
+        comment: metadata.comment,
+        files: metadata.files.map((file: ZipInfo) => ({
+          filename: file.filename,
+          size: file.size,
+          compressedSize: file.compressedSize,
+          lastModDate: file.lastModDate,
+          encrypted: file.encrypted,
+          comment: file.comment,
+        })),
+      };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(resultInfo),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Failed to get ZIP information: ${formatError(error)}`,
+          },
+        ],
+      };
+    }
+  },
+});
+
+// Start server with stdio transport by default
+const transportType =
+  process.env.MCP_TRANSPORT_TYPE || process.env.TRANSPORT_TYPE || "stdio";
+server.start({ transportType: "stdio" });
+
+// If a HTTP port is specified via environment variable, start the HTTP server
+const httpPortEnv = process.env.MCP_HTTP_PORT || process.env.HTTP_PORT;
+if (transportType === "http" || httpPortEnv) {
+  const port = parseInt(httpPortEnv || "3000", 10);
+  startHttpServer(port);
+}
 
 console.log("ZIP MCP Server started");

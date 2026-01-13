@@ -44,36 +44,38 @@ export async function compressData(
       // Handle multiple file compression
       for (const item of data) {
         let fileData: Uint8Array | Blob | string = item.data;
-        
+
         // Convert string to Uint8Array
         if (typeof fileData === 'string') {
           const encoder = new TextEncoder();
           fileData = encoder.encode(fileData);
         }
-        
-        await zipWriter.add(item.name, 
-          typeof fileData === 'string' 
+
+        await zipWriter.add(
+          item.name,
+          typeof fileData === 'string'
             ? new zip.TextReader(fileData)
-            : fileData instanceof Blob 
-              ? new zip.BlobReader(fileData) 
+            : fileData instanceof Blob
+              ? new zip.BlobReader(fileData)
               : new zip.Uint8ArrayReader(fileData)
         );
       }
     } else {
       // Handle single file compression
       let fileData = data;
-      
+
       // Convert string to Uint8Array
       if (typeof fileData === 'string') {
         const encoder = new TextEncoder();
         fileData = encoder.encode(fileData);
       }
-      
-      await zipWriter.add('file', 
-        typeof fileData === 'string' 
+
+      await zipWriter.add(
+        'file',
+        typeof fileData === 'string'
           ? new zip.TextReader(fileData)
-          : fileData instanceof Blob 
-            ? new zip.BlobReader(fileData) 
+          : fileData instanceof Blob
+            ? new zip.BlobReader(fileData)
             : new zip.Uint8ArrayReader(fileData)
       );
     }
@@ -94,10 +96,10 @@ export async function decompressData(
   try {
     const reader = data instanceof Blob ? new zip.BlobReader(data) : new zip.Uint8ArrayReader(data);
     const zipReader = new zip.ZipReader(reader, { password: options.password });
-    
+
     const entries = await zipReader.getEntries();
     const results: { name: string, data: Uint8Array }[] = [];
-    
+
     for (const entry of entries) {
       if (!entry.directory && typeof entry.getData === 'function') {
         const writer = new zip.Uint8ArrayWriter();
@@ -108,7 +110,7 @@ export async function decompressData(
         });
       }
     }
-    
+
     await zipReader.close();
     return results;
   } catch (error: any) {
@@ -126,12 +128,12 @@ export async function getZipInfo(
   try {
     const reader = data instanceof Blob ? new zip.BlobReader(data) : new zip.Uint8ArrayReader(data);
     const zipReader = new zip.ZipReader(reader, { password: options.password });
-    
+
     const entries = await zipReader.getEntries();
     const files: ZipInfo[] = [];
     let totalSize = 0;
     let totalCompressedSize = 0;
-    
+
     for (const entry of entries) {
       if (!entry.directory) {
         files.push({
@@ -142,19 +144,19 @@ export async function getZipInfo(
           encrypted: entry.encrypted,
           comment: entry.comment
         });
-        
+
         totalSize += entry.uncompressedSize;
         totalCompressedSize += entry.compressedSize;
       }
     }
-    
+
     const metadata: ZipMetadata = {
       files,
       totalSize,
       totalCompressedSize,
       comment: zipReader.comment ? new TextDecoder().decode(zipReader.comment) : undefined
     };
-    
+
     await zipReader.close();
     return metadata;
   } catch (error: any) {
