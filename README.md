@@ -1,51 +1,220 @@
-# ZIP MCP Server
 
-[中文](README_CN.md) | English
+# MCP ZIP Server
 
-## Project Introduction
+**MCP ZIP Server** is a **Model Context Protocol (MCP) tool server** that provides ZIP compression, decompression, and archive inspection for AI agents.
 
-<a href="https://glama.ai/mcp/servers/@7gugu/mcp-zip">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@7gugu/mcp-zip/badge" />
-</a>
+It is designed to work both:
 
-ZIP MCP Server is a compression server based on fastMCP and zip.js, implementing the Model Context Protocol (MCP). This project provides fully parameter‑controlled ZIP compression, decompression, and query compression package information functions.
-In addition to the default stdio transport (for local AI clients such as Cursor, Claude Desktop, etc.), this repository also supports **HTTP transport** to be consumed by remote AI services like Hugging Face Chat. When launched with an HTTP port environment variable the server exposes a small REST API with health, tool listing, and tool invocation endpoints. Tools now support both path‑based file operations and safe in‑memory operations via base64 encoded data.
+- **Locally** (via MCP `stdio`, e.g. Cursor, Claude Desktop)
+    
+- **Remotely** (via HTTP, e.g. Hugging Face Chat MCP tools)
+    
+
+The server supports **safe in-memory base64 tools** for hosted environments and **filesystem-based tools** for local use.
+
+---
+
+**MCP-zip is:**
+
+- A headless MCP tool server
+    
+- Suitable for Hugging Face Chat MCP tools
+    
+- Suitable for Docker-based deployment
+    
+- Stateless and model-friendly
+
+---
 
 ## Features
 
-- Supports compression and decompression of files and data
-- Supports multi‑file packaging compression
-- Provides compression level control (0‑9)
-- Supports password protection and encryption strength settings
-- Provides query function for compressed package metadata
- - **HTTP transport** always available, with health and invocation endpoints
-- **Base64 tools** for safe remote operation without exposing the server filesystem
+- ZIP compression and decompression
+    
+- Multi-file and directory support
+    
+- Compression level control (0–9)
+    
+- Password-protected archives
+    
+- ZIP metadata inspection
+    
+- **Always-on HTTP transport** (for hosted MCP)
+    
+- **stdio transport** (for local MCP clients)
+    
+- **Base64 tools** for safe remote operation (no filesystem access required)
+    
 
-## Project Structure
+---
 
-```bash
-mcp-zip
-├── src
-│   ├── index.ts               # Application entry point
-│   ├── utils
-│   │   └── compression.ts     # Compression and decompression implementation
-│   └── transport/http.ts      # (inlined in index.ts) HTTP server utilities
-├── tsconfig.json              # TypeScript configuration file
-├── package.json               # npm configuration file
-└── README.md                  # Project documentation
+## Transports
+
+MCP ZIP Server supports **two transports simultaneously**:
+
+### 1. MCP stdio (local)
+
+Used by:
+
+- Cursor
+    
+- Claude Desktop
+    
+- Raycast MCP
+    
+
+### 2. HTTP (remote)
+
+Used by:
+
+- Hugging Face Chat MCP tools
+    
+- Hosted agents
+    
+- Docker / Kubernetes deployments
+    
+
+> The HTTP server **always starts by default**.
+
+---
+
+## HTTP Server Behavior
+
+On startup, the server:
+
+1. Starts MCP over `stdio`
+    
+2. Starts an HTTP server on a configurable port
+    
+
+### Port selection (in order):
+
+1. `PORT` (Hugging Face Spaces standard)
+    
+2. `MCP_HTTP_PORT`
+    
+3. `HTTP_PORT`
+    
+4. Fallback: `3000`
+    
+
+---
+
+## HTTP Endpoints
+
+|Endpoint|Method|Description|
+|---|---|---|
+|`/health`|GET|Server name, version, tool list|
+|`/tools`|GET|List of registered tools|
+|`/invoke/<tool>`|POST|Invoke a tool with JSON arguments|
+
+---
+
+## Hugging Face Spaces (Docker) Setup
+
+This is the **recommended way** to host the MCP Server for Hugging Face Chat.
+
+### 1. Create a Docker Space
+
+- Go to **Hugging Face → Spaces**
+    
+- Click **New Space**
+    
+- Select **Docker**
+    
+- Choose your repo branch (e.g. `hfdocker`)
+    
+
+---
+
+### 2. Minimal Dockerfile
+
+```dockerfile
+FROM node:20-slim
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
+
+COPY . .
+
+RUN npm run build
+
+ENV NODE_ENV=production
+ENV PORT=7860
+
+EXPOSE 7860
+
+CMD ["node", "dist/index.js"]
 ```
 
-## Installation
+> Hugging Face automatically injects `PORT`.
 
-You can install ZIP MCP Server globally using npm:
+---
+
+### 3. Space Settings
+
+In **Space → Settings**:
+
+- No secrets required
+    
+- No GPU required
+    
+- Visibility: public or private
+    
+
+---
+
+### 4. Verify the Space
+
+Once running, open:
+
+```
+https://<your-space>.hf.space/health
+```
+
+Expected response:
+
+```json
+{
+  "name": "MCP ZIP Server",
+  "version": "1.0.x",
+  "tools": ["compress", "decompress", "getZipInfo", "compressBytes", ...]
+}
+```
+
+---
+
+### 5. Add to Hugging Face Chat MCP Tools
+
+1. Open **Hugging Face Chat**
+    
+2. Go to **MCP Tools**
+    
+3. Click **Add server**
+    
+4. Enter:
+    
+    - **Name:** MCP ZIP
+        
+    - **URL:** `https://<your-space>.hf.space`
+        
+5. Save
+    
+
+ZIP tools are now available to models.
+
+---
+
+## Local MCP Setup (Cursor / Claude Desktop)
+
+Install globally:
 
 ```bash
 npm install -g mcp-zip
 ```
 
-## MCP Configuration
-
-After installation, you can configure ZIP MCP in your MCP JSON configuration:
+Add to MCP config:
 
 ```json
 {
@@ -58,210 +227,83 @@ After installation, you can configure ZIP MCP in your MCP JSON configuration:
 }
 ```
 
-## Configure the MCP JSON in the AI Client
+---
 
-- Claude Client: [https://modelcontextprotocol.io/quickstart/user](https://modelcontextprotocol.io/quickstart/user)
-- Raycast: requires installing the MCP plugin
-- Cursor: [https://docs.cursor.com/context/model-context-protocol#configuring-mcp-servers](https://docs.cursor.com/context/model-context-protocol#configuring-mcp-servers)
+## Tool Overview
 
-## MCP Tool Description
+### Filesystem tools (local only)
 
-ZIP MCP Server provides the following tools, which can be called through the MCP protocol:
+- `compress`
+    
+- `decompress`
+    
+- `getZipInfo`
+    
 
-### Compression Tool (compress)
+These operate on local paths and are intended for **local MCP clients only**.
 
-Compress local files or directories into a ZIP file.
+---
 
-**Parameters:**
+### Base64 tools (safe for hosted use)
 
-- `input`: Path of the file or directory to be compressed (string or string array)
-- `output`: Path of the output ZIP file
-- `options`: Compression options (optional)
-  - `level`: Compression level (0‑9, default is 5)
-  - `password`: Password protection
-  - `encryptionStrength`: Encryption strength (1‑3)
-  - `overwrite`: Whether to overwrite existing files (boolean)
+These are **recommended for Hugging Face Chat**.
 
-**Returns:**
+#### `compressBytes`
 
-- Success: Text content containing success information
-- Failure: Text content containing error information
+Compress in-memory files.
 
-### Decompression Tool (decompress)
-
-Decompress local ZIP files to the specified directory.
-
-**Parameters:**
-
-- `input`: Path of the ZIP file
-- `output`: Path of the output directory
-- `options`: Decompression options (optional)
-  - `password`: Decompression password
-  - `overwrite`: Whether to overwrite existing files (boolean)
-  - `createDirectories`: Whether to create non‑existent directories (boolean)
-
-**Returns:**
-
-- Success: Text content containing decompression result information
-- Failure: Text content containing error information
-
-### ZIP Info Tool (getZipInfo)
-
-Get metadata information of local ZIP files.
-
-**Parameters:**
-
-- `input`: Path of the ZIP file
-- `options`: Options (optional)
-  - `password`: Decompression password
-
-**Returns:**
-
-- Success: Text content containing detailed information of the ZIP file, including:
-  - Total number of files
-  - Total size
-  - Compressed size
-  - Compression ratio
-  - Detailed information of each file
-- Failure: Text content containing error information
-
-### Test Tool (echo)
-
-Returns the input message to test if the service is running normally.
-
-**Parameters:**
-
-- `message`: Message to be returned
-
-**Returns:**
-
-- Text content containing the input message and current timestamp
-
-### Compression Tool with Base64 (compressBytes)
-
-Compress multiple in‑memory files represented as base64 strings into a ZIP archive. Returns the ZIP archive as a base64 string.
-
-**Parameters:**
-
-- `files`: array of objects with `{ name: string, dataBase64: string }`
-- `options`: Compression options (optional)
-  - `level`: Compression level (0‑9, default is 5)
-  - `password`: Password protection
-  - `encryptionStrength`: Encryption strength (1‑3)
-
-**Returns:**
-
-- Base64 encoded ZIP archive (string)
-
-### Decompression Tool with Base64 (decompressBytes)
-
-Decompress a base64‑encoded ZIP archive and return an array of file objects with base64 data.
-
-**Parameters:**
-
-- `zipDataBase64`: Base64 encoded ZIP archive
-- `options`: Decompression options (optional)
-  - `password`: Decompression password
-
-**Returns:**
-
-- JSON stringified array of `{ name: string, dataBase64: string }`
-
-### ZIP Info Tool with Base64 (getZipInfoBytes)
-
-Get metadata information of a ZIP archive provided as a base64 string.
-
-**Parameters:**
-
-- `zipDataBase64`: Base64 encoded ZIP archive
-- `options`: Options (optional)
-  - `password`: Decompression password
-
-**Returns:**
-
-- JSON stringified metadata, including total files, total size, compressed size, compression ratio and details per file.
-
-## Examples
-
-Examples of calling tools using the MCP client:
-
-```javascript
-// Compress files
-await client.executeTool("compress", {
-  input: "/path/to/files/or/directory",
-  output: "/path/to/output.zip",
-  options: {
-    level: 9,
-    comment: "Test compression",
-    password: "secret",
-    overwrite: true,
-  },
-});
-
-// Decompress files
-await client.executeTool("decompress", {
-  input: "/path/to/archive.zip",
-  output: "/path/to/extract/directory",
-  options: {
-    password: "secret",
-    overwrite: true,
-    createDirectories: true,
-  },
-});
-
-// Get ZIP info
-await client.executeTool("getZipInfo", {
-  input: "/path/to/archive.zip",
-  options: {
-    password: "secret",
-  },
-});
-
-// Test service
-await client.executeTool("echo", {
-  message: "Hello, ZIP MCP Server!",
-});
-
-// Compress in‑memory files (base64)
-await client.executeTool("compressBytes", {
-  files: [
-    { name: "a.txt", dataBase64: btoa("hello world") },
-    { name: "b.txt", dataBase64: btoa("foo bar") },
-  ],
-});
-
-// Decompress base64 archive
-const zippedBase64 = "..."; // base64 string returned by compressBytes
-await client.executeTool("decompressBytes", {
-  zipDataBase64: zippedBase64,
-});
-
-// Get info of base64 archive
-await client.executeTool("getZipInfoBytes", {
-  zipDataBase64: zippedBase64,
-});
+```json
+{
+  "files": [
+    { "name": "a.txt", "dataBase64": "aGVsbG8=" }
+  ]
+}
 ```
 
-## HTTP Mode
+Returns: base64 ZIP archive.
 
-The server always starts an HTTP listener in addition to the default `stdio` transport. This makes the service available both as a local stdio MCP server and as a remote HTTP MCP server without any configuration. The HTTP port is determined by the following environment variables (checked in order):
+---
 
-- `PORT` – commonly provided by platforms such as Hugging Face Spaces and Cloud Run
-- `MCP_HTTP_PORT` – custom override for the MCP server
-- `HTTP_PORT` – legacy override
-- If none are set, the default port `3000` is used
+#### `decompressBytes`
 
-For example, to run the server on port `8080`:
+Decompress a base64 ZIP archive.
 
-```bash
-# Start with HTTP listener on port 8080 (stdio remains enabled)
-PORT=8080 npx tsx src/index.ts
+```json
+{
+  "zipDataBase64": "UEsDB..."
+}
 ```
 
-The HTTP server exposes the following endpoints:
+Returns: array of `{ name, dataBase64 }`.
 
-- `GET /health` – Returns the server name, version and list of tools
-- `GET /tools` – Returns the list of registered tool names
-- `POST /invoke/<toolName>` – Invokes a tool. The request body must be JSON containing the tool arguments. The response body contains the tool result.
+---
 
-These endpoints allow you to integrate ZIP MCP Server as a remote MCP tool provider in services like Hugging Face Chat. In the chat UI, users can add this server in the “MCP tools” section by specifying the URL (e.g. `https://your-space.hf.space`) where the service is deployed.
+#### `getZipInfoBytes`
+
+Inspect a base64 ZIP archive.
+
+```json
+{
+  "zipDataBase64": "UEsDB..."
+}
+```
+
+Returns: metadata JSON.
+
+---
+
+## Security Notes
+
+- Hosted deployments should **prefer base64 tools**
+    
+- Filesystem tools should not be exposed to untrusted users
+    
+- ZIP bomb protection and size limits are recommended at the platform level
+    
+
+---
+
+## Versioning
+
+- HTTP + base64 support: `>=1.0.3`
+    
