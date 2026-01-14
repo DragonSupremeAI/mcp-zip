@@ -9,7 +9,7 @@
 </a>
 
 ZIP MCP Server 是一个基于 fastMCP 和 zip.js 的压缩服务器，实现了 Model Context Protocol (MCP) 协议。本项目提供了全参数可控的 ZIP 压缩、解压缩和查询压缩包信息功能。
-除了默认的 `stdio` 传输模式（适用于 Cursor、Claude Desktop 等本地客户端），现在还支持 **HTTP 传输**，可部署为远程服务供 Hugging Face Chat 等模型调用。通过设置环境变量启动为 HTTP 模式，服务将暴露 REST API，包括健康检查、工具列举和调用接口。工具同时支持基于路径的文件操作和通过 base64 字符串进行的安全内存操作。
+ 除了默认的 `stdio` 传输模式（适用于 Cursor、Claude Desktop 等本地客户端），现在始终启用 **HTTP 传输**，可部署为远程服务供 Hugging Face Chat 等模型调用。服务启动时自动启动一个 HTTP 监听器，并暴露 REST API，包括健康检查、工具列举和调用接口。工具同时支持基于路径的文件操作和通过 base64 字符串进行的安全内存操作。
 
 ## 功能特点
 
@@ -18,7 +18,7 @@ ZIP MCP Server 是一个基于 fastMCP 和 zip.js 的压缩服务器，实现了
 - 提供压缩级别控制 (0‑9)
 - 支持密码保护和加密强度设置
 - 提供压缩包元数据查询功能
-- **HTTP 传输**（可选），提供 health 和调用端点
+ - **HTTP 传输**（始终启用），提供 health 和调用端点
 - **base64 工具**，适合远程调用时安全传输数据
 
 ## 项目结构
@@ -239,20 +239,29 @@ await client.executeTool("getZipInfoBytes", {
 
 ## HTTP 模式
 
-默认情况下，服务器使用 `stdio` 传输，适合与本地 AI 客户端一起运行。要将服务器以 HTTP 模式暴露（例如供 Hugging Face Chat 使用），可以在启动前设置 `HTTP_PORT` 或 `MCP_HTTP_PORT` 环境变量：
+服务器在启动时始终启用一个 HTTP 监听器，并保持默认的 `stdio` 传输。无论是否配置环境变量，HTTP 接口都会自动开放。这使得服务既可以作为本地 MCP 服务器运行，也可以通过网络供 Hugging Face Chat 等远程客户端调用。
+
+HTTP 服务监听的端口通过以下环境变量按顺序决定：
+
+- `PORT` – 平台（如 Hugging Face Spaces、Cloud Run）通常提供此变量
+- `MCP_HTTP_PORT` – 用于自定义 MCP 服务端口
+- `HTTP_PORT` – 传统端口配置
+- 如果都未设置，默认使用 `3000`
+
+例如，将服务器运行在端口 8080：
 
 ```bash
-# 在端口 8080 上启用 HTTP 模式
-HTTP_PORT=8080 npx tsx src/index.ts
+# 在端口 8080 启动 HTTP 监听（stdio 仍然可用）
+PORT=8080 npx tsx src/index.ts
 ```
 
-在 HTTP 模式下，可用的端点包括：
+HTTP 模式下可用的端点包括：
 
 - `GET /health` – 返回服务名称、版本和工具列表
 - `GET /tools` – 返回注册的工具名称
 - `POST /invoke/<toolName>` – 调用指定工具，请求体为 JSON，包含工具参数；响应体为工具结果
 
-这些端点使得将 ZIP MCP Server 作为远程 MCP 服务器集成到 Hugging Face Chat 成为可能。用户可以在聊天界面的 “MCP tools” 部分添加此服务的 URL。
+这些端点使得将 ZIP MCP Server 作为远程 MCP 服务器集成到 Hugging Face Chat 成为可能。用户可以在聊天界面的 “MCP tools” 部分添加服务的 URL（例如 `https://your-space.hf.space`）。
 
 ## 联系方式
 

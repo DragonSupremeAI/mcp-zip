@@ -629,15 +629,36 @@ addTool({
 });
 
 // Start server with stdio transport by default
+// Preserve backwards compatibility by always starting the stdio transport. Tools
+// like local MCP clients will still be able to connect via stdio without any
+// configuration. When running in environments like Hugging Face Spaces, an
+// HTTP listener is also started automatically on a configurable port so that
+// external clients can discover and invoke tools over the network.
 const transportType =
   process.env.MCP_TRANSPORT_TYPE || process.env.TRANSPORT_TYPE || "stdio";
+// Always start the stdio transport. This call is inexpensive if nothing
+// attaches to stdio, but allows local usage when desired.
 server.start({ transportType: "stdio" });
 
-// If a HTTP port is specified via environment variable, start the HTTP server
-const httpPortEnv = process.env.MCP_HTTP_PORT || process.env.HTTP_PORT;
-if (transportType === "http" || httpPortEnv) {
-  const port = parseInt(httpPortEnv || "3000", 10);
-  startHttpServer(port);
-}
+// Determine the HTTP port. Hugging Face Spaces typically injects a PORT
+// environment variable. Fall back to the custom MCP_HTTP_PORT/HTTP_PORT or
+// default to 3000 when none are provided.  Note that the transportType is
+// ignored here; the HTTP server starts unconditionally to make hosted
+// deployments simpler and more predictable.
+const portEnv =
+  process.env.PORT ||
+  process.env.MCP_HTTP_PORT ||
+  process.env.HTTP_PORT ||
+  "3000";
+const port = parseInt(portEnv, 10);
 
-console.log("ZIP MCP Server started");
+// Always start an HTTP server for remote invocation. This exposes the
+// /health, /tools and /invoke endpoints regardless of the transport type and
+// allows tools to be consumed via network requests (e.g. by Hugging Face Chat
+// MCP support). If the port is already in use the server will throw when
+// binding to the port.
+startHttpServer(port);
+
+console.log(
+  `ZIP MCP Server started (stdio transport and HTTP listener on port ${port})`
+);

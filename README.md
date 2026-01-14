@@ -18,7 +18,7 @@ In addition to the default stdio transport (for local AI clients such as Cursor,
 - Provides compression level control (0‑9)
 - Supports password protection and encryption strength settings
 - Provides query function for compressed package metadata
-- **HTTP transport** with health and invocation endpoints (optional)
+ - **HTTP transport** always available, with health and invocation endpoints
 - **Base64 tools** for safe remote operation without exposing the server filesystem
 
 ## Project Structure
@@ -244,22 +244,24 @@ await client.executeTool("getZipInfoBytes", {
 
 ## HTTP Mode
 
-By default the server uses the `stdio` transport which is suitable for running next to an AI client. To expose the server over HTTP (e.g. for Hugging Face Chat), set the `HTTP_PORT` or `MCP_HTTP_PORT` environment variable before starting:
+The server always starts an HTTP listener in addition to the default `stdio` transport. This makes the service available both as a local stdio MCP server and as a remote HTTP MCP server without any configuration. The HTTP port is determined by the following environment variables (checked in order):
+
+- `PORT` – commonly provided by platforms such as Hugging Face Spaces and Cloud Run
+- `MCP_HTTP_PORT` – custom override for the MCP server
+- `HTTP_PORT` – legacy override
+- If none are set, the default port `3000` is used
+
+For example, to run the server on port `8080`:
 
 ```bash
-# Start with HTTP transport on port 8080
-HTTP_PORT=8080 npx tsx src/index.ts
+# Start with HTTP listener on port 8080 (stdio remains enabled)
+PORT=8080 npx tsx src/index.ts
 ```
 
-When running in HTTP mode, the following endpoints are available:
+The HTTP server exposes the following endpoints:
 
-- `GET /health` – Returns server name, version and list of tools
+- `GET /health` – Returns the server name, version and list of tools
 - `GET /tools` – Returns the list of registered tool names
-- `POST /invoke/<toolName>` – Invokes a tool. The request body must be JSON containing the tool arguments. The response body is the tool result.
+- `POST /invoke/<toolName>` – Invokes a tool. The request body must be JSON containing the tool arguments. The response body contains the tool result.
 
-These endpoints make it possible to integrate ZIP MCP Server as a remote MCP server in Hugging Face Chat. Users can add it in the "MCP tools" section of the chat UI by specifying the URL where the service is deployed.
-
-## Contact
-
-- Email: [gz7gugu@qq.com](mailto:gz7gugu@qq.com)
-- Blog: [https://7gugu.com](https://7gugu.com)
+These endpoints allow you to integrate ZIP MCP Server as a remote MCP tool provider in services like Hugging Face Chat. In the chat UI, users can add this server in the “MCP tools” section by specifying the URL (e.g. `https://your-space.hf.space`) where the service is deployed.
