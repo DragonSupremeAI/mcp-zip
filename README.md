@@ -4,8 +4,8 @@
 
 ## Project Introduction
 
-<a href="https://glama.ai/mcp/servers/@7gugu/zip-mcp">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@7gugu/zip-mcp/badge" />
+<a href="https://glama.ai/mcp/servers/@7gugu/mcp-zip">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@7gugu/mcp-zip/badge" />
 </a>
 
 ZIP MCP Server is a compression server based on fastMCP and zip.js, implementing the Model Context Protocol (MCP). This project provides fully parameter‑controlled ZIP compression, decompression, and query compression package information functions.
@@ -24,7 +24,7 @@ In addition to the default stdio transport (for local AI clients such as Cursor,
 ## Project Structure
 
 ```bash
-zip-mcp
+mcp-zip
 ├── src
 │   ├── index.ts               # Application entry point
 │   ├── utils
@@ -40,7 +40,7 @@ zip-mcp
 You can install ZIP MCP Server globally using npm:
 
 ```bash
-npm install -g zip-mcp
+npm install -g mcp-zip
 ```
 
 ## MCP Configuration
@@ -50,8 +50,8 @@ After installation, you can configure ZIP MCP in your MCP JSON configuration:
 ```json
 {
   "mcpServers": {
-    "zip-mcp": {
-      "command": "zip-mcp",
+    "mcp-zip": {
+      "command": "mcp-zip",
       "args": []
     }
   }

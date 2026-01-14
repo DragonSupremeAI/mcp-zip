@@ -1,10 +1,10 @@
 {
-  "name": "zip-mcp",
+  "name": "mcp-zip",
   "version": "1.0.3",
   "description": "A Model Context Protocol server for ZIP compression using fastMCP and zip.js",
   "main": "dist/index.js",
   "bin": {
-    "zip-mcp": "dist/index.js"
+    "mcp-zip": "dist/index.js"
   },
   "files": [
     "dist",
@@ -27,7 +27,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/7gugu/zip-mcp.git"
+    "url": "git+https://github.com/7gugu/mcp-zip.git"
   },
   "keywords": [
     "mcp",
